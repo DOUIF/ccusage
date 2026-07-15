@@ -13,12 +13,15 @@ pub(crate) use loader::load_codex_events;
 #[cfg(test)]
 pub(crate) use loader::load_codex_events_from_directory;
 pub(crate) use report::{
-    calculate_codex_model_cost, calculate_group_cost, codex_model_missing_pricing,
-    non_cached_input_tokens,
+    calculate_codex_model_cost_with_policy, calculate_group_cost_with_policy,
+    codex_model_missing_pricing, non_cached_input_tokens,
 };
-pub(crate) use speed::resolve_codex_speed;
+pub(crate) use speed::resolve_codex_auto_fallback;
 
-use report::{print_table_from_groups, report_from_groups};
+use report::{print_table_from_groups_with_speed_view, report_from_groups_with_speed_view};
+
+#[cfg(test)]
+use report::{calculate_codex_model_cost, report_from_groups};
 
 #[cfg(test)]
 use crate::{
@@ -37,12 +40,28 @@ pub(crate) fn run(args: AgentCommandArgs) -> Result<()> {
         shared.pricing_overrides.iter(),
     );
     let groups = load_groups(&shared, args.kind)?;
-    let speed = resolve_codex_speed(args.codex_speed);
+    let speed = args.codex_speed;
+    let auto_fallback = resolve_codex_auto_fallback();
     if wants_json(&shared) {
-        let output = report_from_groups(&groups, args.kind, &pricing, speed);
+        let output = report_from_groups_with_speed_view(
+            &groups,
+            args.kind,
+            &pricing,
+            speed,
+            auto_fallback,
+            args.codex_speed_view,
+        );
         return print_json_or_jq(output, shared.jq.as_deref(), shared.no_cost);
     }
-    print_table_from_groups(&groups, args.kind, &pricing, speed, &shared)
+    print_table_from_groups_with_speed_view(
+        &groups,
+        args.kind,
+        &pricing,
+        speed,
+        auto_fallback,
+        args.codex_speed_view,
+        &shared,
+    )
 }
 
 #[cfg(test)]
@@ -55,6 +74,27 @@ pub(crate) fn report_json(
 ) -> Result<Value> {
     let groups = aggregate_events(events, kind, timezone)?;
     Ok(report_from_groups(&groups, kind, pricing, speed))
+}
+
+#[cfg(test)]
+pub(crate) fn report_json_with_speed_view(
+    events: &[CodexTokenUsageEvent],
+    kind: AgentReportKind,
+    timezone: Option<&str>,
+    pricing: &PricingMap,
+    speed: CodexSpeed,
+    auto_fallback: crate::CodexServiceTier,
+    speed_view: crate::cli::CodexSpeedView,
+) -> Result<Value> {
+    let groups = aggregate_events(events, kind, timezone)?;
+    Ok(report_from_groups_with_speed_view(
+        &groups,
+        kind,
+        pricing,
+        speed,
+        auto_fallback,
+        speed_view,
+    ))
 }
 
 #[cfg(test)]
@@ -127,6 +167,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 timestamp: "2026-01-02T00:00:00.000Z".to_string(),
                 model: Some("gpt-5".to_string()),
+                service_tier: None,
                 input_tokens: 100,
                 cached_input_tokens: 90,
                 output_tokens: 5,
@@ -170,6 +211,7 @@ mod tests {
                     session_id: "session-1".to_string(),
                     timestamp: "2026-01-02T00:00:00.000Z".to_string(),
                     model: Some("private-codex-alpha".to_string()),
+                    service_tier: None,
                     input_tokens: 100,
                     cached_input_tokens: 10,
                     output_tokens: 5,
@@ -181,6 +223,7 @@ mod tests {
                     session_id: "session-1".to_string(),
                     timestamp: "2026-01-02T00:00:01.000Z".to_string(),
                     model: Some("private-codex-beta".to_string()),
+                    service_tier: None,
                     input_tokens: 50,
                     cached_input_tokens: 5,
                     output_tokens: 3,
@@ -354,6 +397,249 @@ mod tests {
     }
 
     #[test]
+    fn auto_prices_recorded_tiers_and_falls_back_only_for_unknown_usage() {
+        let mut pricing = PricingMap::default();
+        pricing.load_json(
+            r#"{
+                "gpt-test": {
+                    "input_cost_per_token": 0.000001,
+                    "output_cost_per_token": 0.000010
+                }
+            }"#,
+        );
+        let tier = |input_tokens, output_tokens| crate::CodexTierUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens: input_tokens + output_tokens,
+            ..crate::CodexTierUsage::default()
+        };
+        let usage = CodexModelUsage {
+            input_tokens: 250,
+            output_tokens: 25,
+            total_tokens: 275,
+            speed: crate::CodexSpeedUsage {
+                standard: tier(100, 10),
+                fast: tier(100, 10),
+                unknown: tier(50, 5),
+            },
+            ..CodexModelUsage::default()
+        };
+
+        let cost = calculate_codex_model_cost_with_policy(
+            "gpt-test",
+            &usage,
+            &pricing,
+            CodexSpeed::Auto,
+            crate::CodexServiceTier::Standard,
+        );
+
+        assert!((cost - 0.0007).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn auto_preserves_fast_pricing_for_recorded_long_context_usage() {
+        let mut pricing = PricingMap::default();
+        pricing.load_json(
+            r#"{
+                "gpt-test": {
+                    "input_cost_per_token": 0.000001,
+                    "output_cost_per_token": 0.000010,
+                    "input_cost_per_token_above_200k_tokens": 0.000002,
+                    "output_cost_per_token_above_200k_tokens": 0.000020,
+                    "fast_mode_multiplier": 2.0
+                }
+            }"#,
+        );
+        let tier = crate::CodexTierUsage {
+            input_tokens: 300_001,
+            output_tokens: 10,
+            total_tokens: 300_011,
+            long_context_input_tokens: 300_001,
+            long_context_output_tokens: 10,
+            ..crate::CodexTierUsage::default()
+        };
+        let usage = CodexModelUsage {
+            input_tokens: 300_001,
+            output_tokens: 10,
+            total_tokens: 300_011,
+            long_context_input_tokens: 300_001,
+            long_context_output_tokens: 10,
+            speed: crate::CodexSpeedUsage {
+                fast: tier,
+                ..crate::CodexSpeedUsage::default()
+            },
+            ..CodexModelUsage::default()
+        };
+
+        let auto_cost = calculate_codex_model_cost_with_policy(
+            "gpt-test",
+            &usage,
+            &pricing,
+            CodexSpeed::Auto,
+            crate::CodexServiceTier::Standard,
+        );
+        let forced_fast =
+            calculate_codex_model_cost("gpt-test", &usage, &pricing, CodexSpeed::Fast);
+
+        assert!((auto_cost - forced_fast).abs() < f64::EPSILON);
+        assert!((auto_cost - 1.200_404).abs() < 1e-9);
+    }
+
+    #[test]
+    fn detailed_json_reports_full_standard_and_fast_breakdowns() {
+        let mut pricing = PricingMap::default();
+        pricing.load_json(
+            r#"{
+                "gpt-test": {
+                    "input_cost_per_token": 0.000001,
+                    "output_cost_per_token": 0.000010
+                }
+            }"#,
+        );
+        let event =
+            |timestamp: &str, service_tier, input_tokens, output_tokens| CodexTokenUsageEvent {
+                session_id: "session-1".to_string(),
+                timestamp: timestamp.to_string(),
+                model: Some("gpt-test".to_string()),
+                service_tier,
+                input_tokens,
+                cached_input_tokens: 0,
+                output_tokens,
+                reasoning_output_tokens: 0,
+                total_tokens: input_tokens + output_tokens,
+                is_fallback_model: false,
+            };
+        let events = vec![
+            event(
+                "2026-07-14T08:00:00.000Z",
+                Some(crate::CodexServiceTier::Standard),
+                100,
+                10,
+            ),
+            event(
+                "2026-07-14T08:01:00.000Z",
+                Some(crate::CodexServiceTier::Fast),
+                50,
+                5,
+            ),
+        ];
+
+        let report = report_json_with_speed_view(
+            &events,
+            AgentReportKind::Daily,
+            Some("UTC"),
+            &pricing,
+            CodexSpeed::Auto,
+            crate::CodexServiceTier::Standard,
+            crate::cli::CodexSpeedView::Detailed,
+        )
+        .unwrap();
+
+        assert_eq!(
+            report["daily"][0]["speedBreakdown"]["standard"]["inputTokens"],
+            100
+        );
+        assert_eq!(
+            report["daily"][0]["speedBreakdown"]["standard"]["totalTokens"],
+            110
+        );
+        assert_eq!(
+            report["daily"][0]["speedBreakdown"]["fast"]["inputTokens"],
+            50
+        );
+        assert_eq!(
+            report["daily"][0]["speedBreakdown"]["fast"]["totalTokens"],
+            55
+        );
+        assert_eq!(
+            report["daily"][0]["models"]["gpt-test"]["speedBreakdown"]["fast"]["outputTokens"],
+            5
+        );
+        let standard_cost = report["totals"]["speedBreakdown"]["standard"]["costUSD"]
+            .as_f64()
+            .unwrap();
+        let fast_cost = report["totals"]["speedBreakdown"]["fast"]["costUSD"]
+            .as_f64()
+            .unwrap();
+        assert!((standard_cost - 0.0002).abs() < f64::EPSILON);
+        assert!((fast_cost - 0.0002).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn speed_view_filters_turns_by_effective_tier() {
+        let event = |timestamp: &str, service_tier, total_tokens| CodexTokenUsageEvent {
+            session_id: "session-1".to_string(),
+            timestamp: timestamp.to_string(),
+            model: Some("gpt-test".to_string()),
+            service_tier,
+            input_tokens: total_tokens,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens,
+            is_fallback_model: false,
+        };
+        let events = vec![
+            event(
+                "2026-07-14T08:00:00.000Z",
+                Some(crate::CodexServiceTier::Standard),
+                100,
+            ),
+            event(
+                "2026-07-15T08:00:00.000Z",
+                Some(crate::CodexServiceTier::Fast),
+                50,
+            ),
+        ];
+
+        let report = report_json_with_speed_view(
+            &events,
+            AgentReportKind::Daily,
+            Some("UTC"),
+            &PricingMap::default(),
+            CodexSpeed::Auto,
+            crate::CodexServiceTier::Standard,
+            crate::cli::CodexSpeedView::Fast,
+        )
+        .unwrap();
+
+        assert_eq!(report["daily"].as_array().unwrap().len(), 1);
+        assert_eq!(report["daily"][0]["date"], "2026-07-15");
+        assert_eq!(report["totals"]["totalTokens"], 50);
+        assert!(report["daily"][0].get("speedBreakdown").is_none());
+    }
+
+    #[test]
+    fn explicit_speed_override_applies_before_view_filter() {
+        let events = [CodexTokenUsageEvent {
+            session_id: "session-1".to_string(),
+            timestamp: "2026-07-14T08:00:00.000Z".to_string(),
+            model: Some("gpt-test".to_string()),
+            service_tier: Some(crate::CodexServiceTier::Standard),
+            input_tokens: 100,
+            cached_input_tokens: 0,
+            output_tokens: 10,
+            reasoning_output_tokens: 0,
+            total_tokens: 110,
+            is_fallback_model: false,
+        }];
+
+        let report = report_json_with_speed_view(
+            &events,
+            AgentReportKind::Daily,
+            Some("UTC"),
+            &PricingMap::default(),
+            CodexSpeed::Fast,
+            crate::CodexServiceTier::Standard,
+            crate::cli::CodexSpeedView::Fast,
+        )
+        .unwrap();
+
+        assert_eq!(report["daily"].as_array().unwrap().len(), 1);
+        assert_eq!(report["totals"]["totalTokens"], 110);
+    }
+
+    #[test]
     fn identifies_codex_models_missing_pricing() {
         let mut pricing = PricingMap::default();
         pricing.load_json(
@@ -412,6 +698,7 @@ mod tests {
                 session_id: "/workspace/api/session-a.jsonl".to_string(),
                 timestamp: "2026-01-02T00:00:00.000Z".to_string(),
                 model: Some("gpt-5.3-codex".to_string()),
+                service_tier: None,
                 input_tokens: 140,
                 cached_input_tokens: 40,
                 output_tokens: 5,
@@ -423,6 +710,7 @@ mod tests {
                 session_id: "/workspace/api/session-a.jsonl".to_string(),
                 timestamp: "2026-01-02T00:05:00.000Z".to_string(),
                 model: Some("gpt-5.3-codex".to_string()),
+                service_tier: None,
                 input_tokens: 70,
                 cached_input_tokens: 70,
                 output_tokens: 10,
@@ -434,6 +722,7 @@ mod tests {
                 session_id: "/workspace/web/session-b.jsonl".to_string(),
                 timestamp: "2026-01-05T23:59:59.000Z".to_string(),
                 model: Some("gpt-5-mini".to_string()),
+                service_tier: None,
                 input_tokens: 10,
                 cached_input_tokens: 0,
                 output_tokens: 2,
@@ -445,6 +734,7 @@ mod tests {
                 session_id: "ignored-missing-model".to_string(),
                 timestamp: "2026-01-06T00:00:00.000Z".to_string(),
                 model: None,
+                service_tier: None,
                 input_tokens: 999,
                 cached_input_tokens: 0,
                 output_tokens: 999,

@@ -1,6 +1,5 @@
 ---
 source: crates/ccusage-cli/src/tests.rs
-assertion_line: 752
 expression: cases
 ---
 [
@@ -35,6 +34,7 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "codexSpeedView": "All",
         "kind": "Daily",
         "openClawPath": null,
         "piPath": null,
@@ -183,6 +183,7 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Fast",
+        "codexSpeedView": "All",
         "kind": "Monthly",
         "openClawPath": null,
         "piPath": null,
@@ -235,6 +236,7 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "codexSpeedView": "All",
         "kind": "Weekly",
         "openClawPath": null,
         "piPath": null,
@@ -287,6 +289,7 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "codexSpeedView": "All",
         "kind": "Session",
         "openClawPath": null,
         "piPath": "/tmp/pi-sessions",
@@ -339,6 +342,7 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "codexSpeedView": "All",
         "kind": "Session",
         "openClawPath": "/tmp/openclaw",
         "piPath": null,

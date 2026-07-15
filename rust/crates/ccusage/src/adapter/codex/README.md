@@ -18,6 +18,13 @@ Relevant JSONL event:
 - `payload.info.last_token_usage` is the current turn delta.
 - If only cumulative totals exist, subtract prior totals to recover deltas.
 
+Speed metadata:
+
+- `type === "event_msg"` with `payload.type === "thread_settings_applied"` updates the effective speed for following turns.
+- `payload.thread_settings.service_tier === "priority"` or `"fast"` is Fast.
+- Other recorded tier values are Standard.
+- Usage before the first recorded tier remains unknown and uses the configured fallback only for pricing.
+
 Token mapping:
 
 - `input_tokens` - total input tokens.
@@ -26,4 +33,4 @@ Token mapping:
 - `reasoning_output_tokens` - informational breakdown; already included in output billing.
 - `total_tokens` - provided directly or recomputed as input plus output for legacy entries.
 
-Pricing uses model metadata from `turn_context`. Early sessions without metadata fall back to `gpt-5`, mark `isFallbackModel === true`, and expose fallback rows as approximate in aggregate JSON.
+Pricing uses model metadata from `turn_context` and speed metadata from `thread_settings_applied`. Early sessions without model metadata fall back to `gpt-5`, mark `isFallbackModel === true`, and expose fallback rows as approximate in aggregate JSON.

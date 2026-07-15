@@ -157,6 +157,7 @@ fn main() -> Result<()> {
                 pi_path: None,
                 open_claw_path: None,
                 codex_speed: cli::CodexSpeed::Auto,
+                codex_speed_view: cli::CodexSpeedView::All,
             };
             adapter::all::run(args)
         }
@@ -600,6 +601,7 @@ mod tests {
             session_id: "codex-session".to_string(),
             timestamp: "2026-01-02T00:00:01.000Z".to_string(),
             model: Some("gpt-5".to_string()),
+            service_tier: None,
             input_tokens: 100,
             cached_input_tokens: 10,
             output_tokens: 50,
@@ -641,6 +643,7 @@ mod tests {
             session_id: "codex-session".to_string(),
             timestamp: "2026-01-02T00:00:01.000Z".to_string(),
             model: Some("gpt-5.3-codex".to_string()),
+            service_tier: None,
             input_tokens: 120,
             cached_input_tokens: 30,
             output_tokens: 11,
@@ -678,6 +681,7 @@ mod tests {
             session_id: "codex-session".to_string(),
             timestamp: "2026-01-02T00:00:01.000Z".to_string(),
             model: Some("gpt-test".to_string()),
+            service_tier: None,
             input_tokens: 10,
             cached_input_tokens: 2,
             output_tokens: 5,
@@ -714,6 +718,7 @@ mod tests {
             session_id: "codex-session".to_string(),
             timestamp: "2026-03-18T00:00:01.000Z".to_string(),
             model: Some("gpt-5.4".to_string()),
+            service_tier: None,
             input_tokens: 100,
             cached_input_tokens: 40,
             output_tokens: 10,

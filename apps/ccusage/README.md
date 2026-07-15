@@ -120,6 +120,7 @@ bunx ccusage statusline  # Claude Code status line for hooks (Beta)
 # Source-focused reports and options
 bunx ccusage claude daily --mode display
 bunx ccusage codex daily --speed fast
+bunx ccusage codex session --speed-view detailed
 bunx ccusage opencode weekly
 bunx ccusage amp session
 bunx ccusage droid daily

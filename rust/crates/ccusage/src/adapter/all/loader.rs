@@ -612,11 +612,10 @@ fn load_codex_rows(
     if shared.since.is_none() && shared.until.is_none() {
         let groups = codex::load_groups(shared, kind)?;
         let detected = !groups.is_empty();
-        let speed = codex::resolve_codex_speed(CodexSpeed::Auto);
         return Ok(AgentRows {
             rows: groups
                 .iter()
-                .map(|(period, group)| codex_group_row(period, group, pricing, speed))
+                .map(|(period, group)| codex_group_row(period, group, pricing, CodexSpeed::Auto))
                 .collect(),
             detected,
         });
@@ -626,11 +625,10 @@ fn load_codex_rows(
     let detected = !events.is_empty();
     codex::filter_events_by_date(&mut events, shared)?;
     let groups = codex::aggregate_events(&events, kind, shared.timezone.as_deref())?;
-    let speed = codex::resolve_codex_speed(CodexSpeed::Auto);
     Ok(AgentRows {
         rows: groups
             .iter()
-            .map(|(period, group)| codex_group_row(period, group, pricing, speed))
+            .map(|(period, group)| codex_group_row(period, group, pricing, CodexSpeed::Auto))
             .collect(),
         detected,
     })
@@ -773,6 +771,7 @@ pub(super) fn codex_group_row(
     pricing: &PricingMap,
     speed: CodexSpeed,
 ) -> AllRow {
+    let auto_fallback = codex::resolve_codex_auto_fallback();
     let mut model_breakdowns: Vec<ModelBreakdown> = group
         .models
         .iter()
@@ -786,7 +785,13 @@ pub(super) fn codex_group_row(
                 cache_creation_tokens: 0,
                 cache_read_tokens: usage.cached_input_tokens,
                 extra_total_tokens: 0,
-                cost: codex::calculate_codex_model_cost(model, usage, pricing, speed),
+                cost: codex::calculate_codex_model_cost_with_policy(
+                    model,
+                    usage,
+                    pricing,
+                    speed,
+                    auto_fallback,
+                ),
                 missing_pricing: codex::codex_model_missing_pricing(model, usage, pricing),
             }
         })
@@ -801,7 +806,7 @@ pub(super) fn codex_group_row(
         cache_creation_tokens: 0,
         cache_read_tokens: group.cached_input_tokens,
         total_tokens: group.total_tokens,
-        total_cost: codex::calculate_group_cost(group, pricing, speed),
+        total_cost: codex::calculate_group_cost_with_policy(group, pricing, speed, auto_fallback),
         metadata: Some(json!({
             "lastActivity": group.last_activity,
             "reasoningOutputTokens": group.reasoning_output_tokens,

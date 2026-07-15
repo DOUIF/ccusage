@@ -10,7 +10,7 @@ use jiff::tz::TimeZone as JiffTimeZone;
 use rustc_hash::FxHasher;
 
 use crate::{
-    CodexGroup, CodexTokenUsageEvent, Result,
+    CodexGroup, CodexServiceTier, CodexTierUsage, CodexTokenUsageEvent, Result,
     cli::{AgentReportKind, SharedArgs, WeekDay},
     fast::FxHashSet,
     format_date_tz, parse_ts_timestamp, parse_tz, wants_json, week_start,
@@ -29,6 +29,7 @@ type CodexEventKey = (
     u64,
     u64,
     u64,
+    Option<CodexServiceTier>,
 );
 type CodexDedupeShards = [Mutex<FxHashSet<CodexEventKey>>];
 
@@ -345,7 +346,26 @@ fn accumulate_codex_event_into_group(
         model_usage.long_context_cached_input_tokens += event.cached_input_tokens;
         model_usage.long_context_output_tokens += event.output_tokens;
     }
+    let tier_usage = match event.service_tier {
+        Some(CodexServiceTier::Standard) => &mut model_usage.speed.standard,
+        Some(CodexServiceTier::Fast) => &mut model_usage.speed.fast,
+        None => &mut model_usage.speed.unknown,
+    };
+    accumulate_tier_usage(tier_usage, event, model);
     model_usage.is_fallback |= event.is_fallback_model;
+}
+
+fn accumulate_tier_usage(usage: &mut CodexTierUsage, event: &CodexTokenUsageEvent, model: &str) {
+    usage.input_tokens += event.input_tokens;
+    usage.cached_input_tokens += event.cached_input_tokens;
+    usage.output_tokens += event.output_tokens;
+    usage.reasoning_output_tokens += event.reasoning_output_tokens;
+    usage.total_tokens += event.total_tokens;
+    if event.input_tokens > crate::pricing::long_context_split_threshold(model) {
+        usage.long_context_input_tokens += event.input_tokens;
+        usage.long_context_cached_input_tokens += event.cached_input_tokens;
+        usage.long_context_output_tokens += event.output_tokens;
+    }
 }
 
 fn create_dedupe_shards() -> Vec<Mutex<FxHashSet<CodexEventKey>>> {
@@ -393,6 +413,7 @@ fn codex_event_key(
         event.output_tokens,
         event.reasoning_output_tokens,
         event.total_tokens,
+        event.service_tier,
     )
 }
 
@@ -428,9 +449,23 @@ fn merge_groups(target: &mut BTreeMap<String, CodexGroup>, source: BTreeMap<Stri
             target_usage.long_context_input_tokens += usage.long_context_input_tokens;
             target_usage.long_context_cached_input_tokens += usage.long_context_cached_input_tokens;
             target_usage.long_context_output_tokens += usage.long_context_output_tokens;
+            merge_tier_usage(&mut target_usage.speed.standard, &usage.speed.standard);
+            merge_tier_usage(&mut target_usage.speed.fast, &usage.speed.fast);
+            merge_tier_usage(&mut target_usage.speed.unknown, &usage.speed.unknown);
             target_usage.is_fallback |= usage.is_fallback;
         }
     }
+}
+
+fn merge_tier_usage(target: &mut CodexTierUsage, source: &CodexTierUsage) {
+    target.input_tokens += source.input_tokens;
+    target.cached_input_tokens += source.cached_input_tokens;
+    target.output_tokens += source.output_tokens;
+    target.reasoning_output_tokens += source.reasoning_output_tokens;
+    target.total_tokens += source.total_tokens;
+    target.long_context_input_tokens += source.long_context_input_tokens;
+    target.long_context_cached_input_tokens += source.long_context_cached_input_tokens;
+    target.long_context_output_tokens += source.long_context_output_tokens;
 }
 
 pub(crate) fn aggregate_events(
@@ -589,6 +624,82 @@ mod tests {
         assert_eq!(usage.long_context_input_tokens, 280_000);
         assert_eq!(usage.long_context_cached_input_tokens, 20_000);
         assert_eq!(usage.long_context_output_tokens, 500);
+    }
+
+    #[test]
+    fn aggregates_usage_into_recorded_speed_buckets() {
+        let fixture = fs_fixture!({
+            "sessions/root.jsonl": [
+                json!({
+                    "timestamp": "2026-07-14T08:00:00.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": { "service_tier": "priority" },
+                    },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T08:00:01.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "model": "gpt-5.6-sol",
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 10,
+                                "output_tokens": 20,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T08:01:00.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": { "service_tier": null },
+                    },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T08:01:01.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "model": "gpt-5.6-sol",
+                            "last_token_usage": {
+                                "input_tokens": 50,
+                                "cached_input_tokens": 5,
+                                "output_tokens": 10,
+                                "total_tokens": 60,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        });
+        let shared = SharedArgs {
+            timezone: Some("UTC".to_string()),
+            ..SharedArgs::default()
+        };
+
+        let groups =
+            load_groups_from_directory(&fixture.path("sessions"), &shared, AgentReportKind::Daily)
+                .unwrap();
+
+        let usage = groups["2026-07-14"].models.get("gpt-5.6-sol").unwrap();
+        assert_eq!(usage.speed.fast.input_tokens, 100);
+        assert_eq!(usage.speed.fast.total_tokens, 120);
+        assert_eq!(usage.speed.standard.input_tokens, 50);
+        assert_eq!(usage.speed.standard.total_tokens, 60);
+        assert_eq!(usage.speed.unknown.total_tokens, 0);
     }
 
     #[test]

@@ -137,11 +137,37 @@ pub(crate) struct CodexRawUsage {
     pub(crate) total_tokens: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum CodexServiceTier {
+    Standard,
+    Fast,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CodexTierUsage {
+    pub(crate) input_tokens: u64,
+    pub(crate) cached_input_tokens: u64,
+    pub(crate) output_tokens: u64,
+    pub(crate) reasoning_output_tokens: u64,
+    pub(crate) total_tokens: u64,
+    pub(crate) long_context_input_tokens: u64,
+    pub(crate) long_context_cached_input_tokens: u64,
+    pub(crate) long_context_output_tokens: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CodexSpeedUsage {
+    pub(crate) standard: CodexTierUsage,
+    pub(crate) fast: CodexTierUsage,
+    pub(crate) unknown: CodexTierUsage,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodexTokenUsageEvent {
     pub(crate) session_id: String,
     pub(crate) timestamp: String,
     pub(crate) model: Option<String>,
+    pub(crate) service_tier: Option<CodexServiceTier>,
     pub(crate) input_tokens: u64,
     pub(crate) cached_input_tokens: u64,
     pub(crate) output_tokens: u64,
@@ -165,6 +191,7 @@ pub(crate) struct CodexModelUsage {
     pub(crate) long_context_input_tokens: u64,
     pub(crate) long_context_cached_input_tokens: u64,
     pub(crate) long_context_output_tokens: u64,
+    pub(crate) speed: CodexSpeedUsage,
     pub(crate) is_fallback: bool,
 }
 

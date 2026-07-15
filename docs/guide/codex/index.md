@@ -19,7 +19,7 @@ ccusage codex monthly
 ccusage codex session
 ```
 
-Most users can start with unified reports such as `ccusage daily`. Add the `codex` namespace only when you want to focus the same report shape on Codex usage or pass Codex-specific options such as `--speed`.
+Most users can start with unified reports such as `ccusage daily`. Add the `codex` namespace only when you want to focus the same report shape on Codex usage or pass Codex-specific options such as `--speed` and `--speed-view`.
 
 ## Data Source
 
@@ -37,7 +37,7 @@ CODEX_HOME="$HOME/.codex,$HOME/.codex-work,$HOME/codex-exec-logs" ccusage codex 
 | `ccusage codex monthly` | Aggregate usage by month     | [Monthly Usage](/guide/monthly-reports) |
 | `ccusage codex session` | Group usage by Codex session | [Session Usage](/guide/session-reports) |
 
-These views support `--json`, `--compact`, `--offline`, and `--speed auto|standard|fast`.
+These views support `--json`, `--compact`, `--offline`, `--speed auto|standard|fast`, and `--speed-view all|standard|fast|detailed`.
 
 ## Monthly Example
 
@@ -48,7 +48,7 @@ These views support `--json`, `--compact`, `--offline`, and `--speed auto|standa
 - **Token deltas** – Each `event_msg` with `payload.type === "token_count"` reports cumulative totals. The CLI subtracts the previous totals to recover per-turn token usage (input, cached input, output, reasoning, total).
 - **Per-model grouping** – The `turn_context` metadata specifies the active model. We aggregate tokens per day/month and per model. Sessions lacking model metadata (seen in early September 2025 builds) are skipped.
 - **Pricing** – Rates come from LiteLLM's pricing dataset via the shared `LiteLLMPricingFetcher`. Codex's internal review label is resolved to the newest known model for the log date before pricing is calculated.
-- **Speed pricing** – `--speed auto` is the default. It reads `config.toml` from each `CODEX_HOME` root and applies fast pricing when any Codex config has `service_tier = "priority"` or legacy `service_tier = "fast"` configured. Fast mode uses the model-specific LiteLLM multiplier when available and otherwise falls back to 2x pricing. Pass `--speed fast` or `--speed standard` to override config-based detection.
+- **Speed pricing** – `--speed auto` is the default. The parser follows each `thread_settings_applied` event, so Standard and Fast turns in the same session are priced separately. Usage without recorded tier metadata falls back to the current `config.toml` setting. Fast mode uses the model-specific LiteLLM multiplier when available and otherwise falls back to 2x pricing. Pass `--speed fast` or `--speed standard` to override all recorded tiers.
 - **Legacy fallback** – Early September 2025 logs that never recorded `turn_context` metadata are still included; the CLI assumes `gpt-5` for pricing so you can review the tokens even though the model tag is missing (the JSON output also marks these rows with `"isFallback": true`).
 - **Cost formula** – Non-cached input uses the standard input price; cached input uses the cache-read price (falling back to the input price when missing); and output tokens are billed at the output price. All prices are per million tokens. Reasoning tokens may be shown for reference, but they are part of the output charge and are not billed separately.
 - **Totals and reports** – Daily, monthly, and session views display per-model breakdowns, overall totals, and optional JSON for automation.
@@ -64,10 +64,10 @@ When Codex emits a model alias, the CLI automatically resolves it through the Li
 
 ## Speed Pricing
 
-Codex logs usually do not include whether a turn used fast mode. By default, `ccusage codex` uses `--speed auto`, reads `config.toml` from each `CODEX_HOME` root, and treats `service_tier = "priority"` or legacy `service_tier = "fast"` as fast pricing when any configured root opts into it. Fast mode uses the model-specific LiteLLM multiplier when available and otherwise falls back to 2x pricing.
+Current Codex logs emit `thread_settings_applied` when the effective thread settings change. By default, `ccusage codex` uses `--speed auto` to apply that tier to following turns, allowing one session to switch between Standard and Fast. Older or headless logs without tier metadata use `config.toml` as a pricing fallback. Fast mode uses the model-specific LiteLLM multiplier when available and otherwise falls back to 2x pricing.
 
 ```bash
-# Default: read Codex config.toml
+# Default: follow per-turn tier metadata, then fall back to config.toml
 ccusage codex daily --speed auto
 
 # Force fast pricing
@@ -75,7 +75,15 @@ ccusage codex daily --speed fast
 
 # Force standard pricing
 ccusage codex daily --speed standard
+
+# Show only turns priced as Fast
+ccusage codex daily --speed-view fast
+
+# Split every period into Standard and Fast rows
+ccusage codex daily --speed-view detailed
 ```
+
+`--speed-view all` is the default combined report. `standard` and `fast` filter the report to one effective tier. `detailed` keeps the combined totals and adds tier-specific table rows plus `speedBreakdown` objects in JSON output. Explicit `--speed standard` or `--speed fast` overrides every turn before the view is applied.
 
 ## JSON Output
 
@@ -87,7 +95,7 @@ ccusage codex monthly --json
 ccusage codex session --json
 ```
 
-Session JSON includes per-model breakdowns, cached token counts, `lastActivity`, and `isFallback` flags for any events that required the legacy `gpt-5` pricing fallback.
+Session JSON includes per-model breakdowns, cached token counts, `lastActivity`, and `isFallback` flags for any events that required the legacy `gpt-5` pricing fallback. Add `--speed-view detailed` for Standard and Fast token and cost breakdowns at row, model, and total levels.
 
 Have feedback or ideas? [Open an issue](https://github.com/ccusage/ccusage/issues/new) so we can improve Codex support.
 

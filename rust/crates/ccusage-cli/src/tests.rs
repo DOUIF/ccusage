@@ -218,6 +218,7 @@ fn agent_command_snapshot(agent: &str, args: AgentCommandArgs) -> Value {
         "piPath": args.pi_path,
         "openClawPath": args.open_claw_path,
         "codexSpeed": format!("{:?}", args.codex_speed),
+        "codexSpeedView": format!("{:?}", args.codex_speed_view),
     })
 }
 
@@ -545,6 +546,7 @@ fn contextual_codex_help_lists_speed_choices() {
     assert!(help.contains("Show Codex token usage grouped by day"));
     assert!(help.contains("USAGE:\n  ccusage codex daily <OPTIONS>"));
     assert!(help.contains("choices: auto | standard | fast"));
+    assert!(help.contains("choices: all | standard | fast | detailed"));
 }
 
 #[test]
@@ -898,6 +900,15 @@ fn parses_codex_speed_option() {
         panic!("expected codex command");
     };
     assert_eq!(args.codex_speed, CodexSpeed::Fast);
+}
+
+#[test]
+fn parses_codex_speed_view_option() {
+    let cli = parse(&["ccusage", "codex", "daily", "--speed-view", "detailed"]);
+    let Some(Command::Codex(args)) = cli.command else {
+        panic!("expected Codex command");
+    };
+    assert_eq!(args.codex_speed_view, CodexSpeedView::Detailed);
 }
 
 #[test]
