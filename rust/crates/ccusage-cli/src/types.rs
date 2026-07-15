@@ -126,6 +126,7 @@ pub struct AgentCommandArgs {
     pub pi_path: Option<String>,
     pub open_claw_path: Option<String>,
     pub codex_speed: CodexSpeed,
+    pub codex_speed_view: CodexSpeedView,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -161,6 +162,15 @@ pub enum CodexSpeed {
     Auto,
     Standard,
     Fast,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CodexSpeedView {
+    #[default]
+    All,
+    Standard,
+    Fast,
+    Detailed,
 }
 
 impl Default for StatuslineArgs {

@@ -4,9 +4,9 @@ use crate::arg_parser::ArgParser;
 use crate::help::{print_help_and_exit, print_version_and_exit};
 use crate::types::{OPENCODE_AGENT_REPORTS, STANDARD_AGENT_REPORTS};
 use crate::{
-    AgentCommandArgs, AgentReportKind, BlocksArgs, Cli, CliConfig, CodexSpeed, Command, CostMode,
-    CostSource, DailyArgs, NoConfig, SessionArgs, SharedArgs, SortOrder, StatuslineArgs,
-    VisualBurnRate, WeekDay, WeeklyArgs, normalize_date_bound,
+    AgentCommandArgs, AgentReportKind, BlocksArgs, Cli, CliConfig, CodexSpeed, CodexSpeedView,
+    Command, CostMode, CostSource, DailyArgs, NoConfig, SessionArgs, SharedArgs, SortOrder,
+    StatuslineArgs, VisualBurnRate, WeekDay, WeeklyArgs, normalize_date_bound,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +44,7 @@ impl RootAllOptions {
             pi_path: None,
             open_claw_path: None,
             codex_speed: CodexSpeed::Auto,
+            codex_speed_view: CodexSpeedView::All,
         }
     }
 }
@@ -399,6 +400,7 @@ fn parse_all_command(
         pi_path: None,
         open_claw_path: None,
         codex_speed: CodexSpeed::Auto,
+        codex_speed_view: CodexSpeedView::All,
     }))
 }
 
@@ -442,6 +444,7 @@ fn parse_top_level_session_command(
         pi_path: None,
         open_claw_path: None,
         codex_speed: CodexSpeed::Auto,
+        codex_speed_view: CodexSpeedView::All,
     }))
 }
 
@@ -581,6 +584,7 @@ fn parse_codex_command(
 ) -> Result<Command, String> {
     let kind = parse_agent_report_kind(parser, "codex", STANDARD_AGENT_REPORTS)?;
     let mut codex_speed = CodexSpeed::Auto;
+    let mut codex_speed_view = CodexSpeedView::All;
     config.apply_agent_args(&mut codex_speed, None, None);
     while parser.peek().is_some() {
         if parse_shared_arg_for_command(parser, &mut shared)? {
@@ -588,6 +592,9 @@ fn parse_codex_command(
         }
         match parser.next_flag()?.as_str() {
             "--speed" => codex_speed = parse_codex_speed(&parser.value_for("--speed")?)?,
+            "--speed-view" => {
+                codex_speed_view = parse_codex_speed_view(&parser.value_for("--speed-view")?)?
+            }
             flag => return Err(format!("Unknown codex option '{flag}'")),
         }
     }
@@ -599,6 +606,7 @@ fn parse_codex_command(
         pi_path: None,
         open_claw_path: None,
         codex_speed,
+        codex_speed_view,
     }))
 }
 
@@ -628,6 +636,7 @@ fn parse_pi_command(
         pi_path,
         open_claw_path: None,
         codex_speed,
+        codex_speed_view: CodexSpeedView::All,
     }))
 }
 
@@ -657,6 +666,7 @@ fn parse_openclaw_command(
         pi_path: None,
         open_claw_path,
         codex_speed,
+        codex_speed_view: CodexSpeedView::All,
     }))
 }
 
@@ -687,6 +697,7 @@ fn agent_command_args(shared: SharedArgs, kind: AgentReportKind) -> AgentCommand
         pi_path: None,
         open_claw_path: None,
         codex_speed: CodexSpeed::Auto,
+        codex_speed_view: CodexSpeedView::All,
     }
 }
 
@@ -896,6 +907,7 @@ fn option_takes_value(arg: &str) -> bool {
             | "--context-low-threshold"
             | "--context-medium-threshold"
             | "--speed"
+            | "--speed-view"
             | "--pi-path"
             | "--open-claw-path"
             | "--sections"
@@ -1059,6 +1071,16 @@ fn parse_codex_speed(value: &str) -> Result<CodexSpeed, String> {
         "standard" => Ok(CodexSpeed::Standard),
         "fast" => Ok(CodexSpeed::Fast),
         _ => Err(format!("Invalid speed option '{value}'")),
+    }
+}
+
+fn parse_codex_speed_view(value: &str) -> Result<CodexSpeedView, String> {
+    match value {
+        "all" => Ok(CodexSpeedView::All),
+        "standard" => Ok(CodexSpeedView::Standard),
+        "fast" => Ok(CodexSpeedView::Fast),
+        "detailed" => Ok(CodexSpeedView::Detailed),
+        _ => Err(format!("Invalid speed view option '{value}'")),
     }
 }
 

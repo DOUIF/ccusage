@@ -185,9 +185,15 @@
 		},
 		{
 			"flags": "--speed [speed]",
-			"description": "Cost speed tier: auto reads Codex config.toml service_tier; use standard or fast to override",
+			"description": "Cost speed tier: auto uses per-turn logs with config.toml fallback; use standard or fast to override",
 			"default": "auto",
 			"choices": ["auto", "standard", "fast"]
+		},
+		{
+			"flags": "--speed-view [view]",
+			"description": "Speed report view: combined, Standard-only, Fast-only, or detailed tier rows",
+			"default": "all",
+			"choices": ["all", "standard", "fast", "detailed"]
 		},
 		{
 			"flags": "--compact",

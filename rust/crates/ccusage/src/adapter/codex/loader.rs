@@ -133,6 +133,7 @@ fn dedupe_codex_events(events: &mut Vec<CodexTokenUsageEvent>) {
             event.output_tokens,
             event.reasoning_output_tokens,
             event.total_tokens,
+            event.service_tier,
         ))
     });
 }
@@ -151,6 +152,7 @@ mod tests {
             session_id: session_id.to_string(),
             timestamp: "2026-01-02T00:00:00.000Z".to_string(),
             model: Some("gpt-5".to_string()),
+            service_tier: None,
             input_tokens: 100,
             cached_input_tokens: 10,
             output_tokens: 50,
@@ -158,6 +160,163 @@ mod tests {
             total_tokens: 150,
             is_fallback_model: false,
         }
+    }
+
+    #[test]
+    fn applies_fast_thread_setting_to_following_usage() {
+        let fixture = fs_fixture!({
+            "session.jsonl": [
+                json!({
+                    "timestamp": "2026-07-14T14:25:48.350Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": {
+                            "service_tier": "priority",
+                        },
+                    },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:25:48.360Z",
+                    "type": "turn_context",
+                    "payload": {
+                        "model": "gpt-5.6-sol",
+                    },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:25:51.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 10,
+                                "output_tokens": 20,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        });
+
+        let events = load_codex_events_from_directory(fixture.root(), true).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].service_tier, Some(crate::CodexServiceTier::Fast));
+    }
+
+    #[test]
+    fn leaves_speed_unknown_when_session_has_no_setting_event() {
+        let fixture = fs_fixture!({
+            "session.jsonl": [
+                json!({
+                    "timestamp": "2026-07-14T14:25:48.360Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.6-sol" },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:25:51.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "output_tokens": 20,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        });
+
+        let events = load_codex_events_from_directory(fixture.root(), true).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].service_tier, None);
+    }
+
+    #[test]
+    fn tracks_spaced_fast_and_standard_setting_changes() {
+        let fixture = fs_fixture!({
+            "session.jsonl": [
+                r#"{ "timestamp": "2026-07-14T14:25:48.350Z", "type" : "event_msg", "payload": { "type" : "thread_settings_applied", "thread_settings": { "service_tier": "priority" } } }"#.to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:25:48.360Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.6-sol" },
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:25:51.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "output_tokens": 20,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+                r#"{ "timestamp": "2026-07-14T14:26:00.000Z", "type" : "event_msg", "payload": { "type" : "thread_settings_applied", "thread_settings": { "service_tier": null } } }"#.to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:26:01.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 50,
+                                "output_tokens": 10,
+                                "total_tokens": 60,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+                r#"{ "timestamp": "2026-07-14T14:27:00.000Z", "type" : "event_msg", "payload": { "type" : "thread_settings_applied", "thread_settings": { "service_tier": "fast" } } }"#.to_string(),
+                json!({
+                    "timestamp": "2026-07-14T14:27:01.000Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 25,
+                                "output_tokens": 5,
+                                "total_tokens": 30,
+                            },
+                        },
+                    },
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        });
+
+        let events = load_codex_events_from_directory(fixture.root(), true).unwrap();
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].service_tier, Some(crate::CodexServiceTier::Fast));
+        assert_eq!(
+            events[1].service_tier,
+            Some(crate::CodexServiceTier::Standard)
+        );
+        assert_eq!(events[2].service_tier, Some(crate::CodexServiceTier::Fast));
     }
 
     #[test]

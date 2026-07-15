@@ -1,19 +1,14 @@
 use std::fs;
 
-use crate::cli::CodexSpeed;
+use crate::CodexServiceTier;
 
 use super::paths;
 
-pub(crate) fn resolve_codex_speed(requested: CodexSpeed) -> CodexSpeed {
-    match requested {
-        CodexSpeed::Auto => {
-            if detect_codex_fast_service_tier() {
-                CodexSpeed::Fast
-            } else {
-                CodexSpeed::Standard
-            }
-        }
-        speed => speed,
+pub(crate) fn resolve_codex_auto_fallback() -> CodexServiceTier {
+    if detect_codex_fast_service_tier() {
+        CodexServiceTier::Fast
+    } else {
+        CodexServiceTier::Standard
     }
 }
 
