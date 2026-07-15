@@ -83,6 +83,48 @@ Use `ccusage daily`, `ccusage weekly`, `ccusage monthly`, or `ccusage session` t
 
 ## Installation
 
+### Install the DOUIF Fork into Bun's Bin Directory
+
+The per-turn Codex Fast/Standard reporting changes are available on the
+[`DOUIF/ccusage`](https://github.com/DOUIF/ccusage) fork. Until those changes are
+published to npm, `bunx ccusage` continues to run the official npm release.
+
+These source installs require [Git](https://git-scm.com/),
+[Rust](https://rustup.rs/), and [Bun](https://bun.com/). Cargo builds the native
+binary and installs it into Bun's bin directory, so use `ccusage` directly after
+installation.
+
+#### macOS
+
+```bash
+git clone https://github.com/DOUIF/ccusage.git
+cd ccusage
+cargo install --path rust/crates/ccusage --locked --force --root "$HOME/.bun"
+ccusage --version
+```
+
+#### Linux
+
+```bash
+git clone https://github.com/DOUIF/ccusage.git
+cd ccusage
+cargo install --path rust/crates/ccusage --locked --force --root "$HOME/.bun"
+ccusage --version
+```
+
+#### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/DOUIF/ccusage.git
+Set-Location ccusage
+cargo install --path .\rust\crates\ccusage --locked --force --root "$env:USERPROFILE\.bun"
+ccusage.exe --version
+```
+
+If `ccusage` is not found after installation, ensure Bun's bin directory is on
+`PATH`: `$HOME/.bun/bin` on macOS/Linux or
+`$env:USERPROFILE\.bun\bin` on Windows.
+
 ### Package Runners
 
 You can run ccusage directly without a global installation:
@@ -106,6 +148,52 @@ bunx -p https://pkg.pr.new/ccusage/ccusage@<pr-number> ccusage --offline
 > [bunx](https://bun.com/docs/pm/bunx) caches the downloaded package, so repeated runs are faster after the first launch.
 
 ## Usage
+
+### DOUIF Fork: Codex Per-Turn Speed Usage
+
+The installed fork reads each Codex `thread_settings_applied` event and assigns
+the effective Standard or Fast tier to following token events. With the default
+`--speed auto`, only legacy or headless usage without recorded tier metadata
+falls back to the current Codex `config.toml` setting.
+
+```bash
+# Combined daily totals, priced from each turn's effective tier
+ccusage codex daily --timezone Asia/Taipei --speed auto --speed-view all
+
+# Split every date into non-empty Standard and Fast rows
+ccusage codex daily --timezone Asia/Taipei --speed-view detailed
+
+# Show only Fast or only Standard usage by date
+ccusage codex daily --timezone Asia/Taipei --speed-view fast
+ccusage codex daily --timezone Asia/Taipei --speed-view standard
+
+# Weekly, monthly, and per-session detailed reports
+ccusage codex weekly --timezone Asia/Taipei --speed-view detailed
+ccusage codex monthly --timezone Asia/Taipei --speed-view detailed
+ccusage codex session --timezone Asia/Taipei --speed-view detailed
+
+# Limit the report to a date range
+ccusage codex daily --since 2026-07-01 --until 2026-07-15 \
+  --timezone Asia/Taipei --speed-view detailed
+
+# Include Standard/Fast token and cost breakdowns in JSON
+ccusage codex daily --timezone Asia/Taipei --speed-view detailed --json
+```
+
+`--speed` controls pricing policy, while `--speed-view` controls filtering and
+presentation:
+
+| Option | Behavior |
+| --- | --- |
+| `--speed auto` | Use recorded per-turn tiers; use `config.toml` only for unknown usage |
+| `--speed standard` | Force all usage to Standard pricing |
+| `--speed fast` | Force all usage to Fast pricing |
+| `--speed-view all` | Show combined rows while retaining per-turn pricing |
+| `--speed-view standard` | Show only usage whose effective tier is Standard |
+| `--speed-view fast` | Show only usage whose effective tier is Fast |
+| `--speed-view detailed` | Show separate Standard and Fast rows and JSON breakdowns |
+
+### Official Package Usage
 
 ```bash
 # Basic usage
